@@ -1,5 +1,3 @@
-mod proxy;
-
 use tokio::fs::File;
 use tokio::net::TcpListener;
 use tokio::time;
@@ -26,11 +24,21 @@ struct _App {
     green: _Service,
 }
 
-enum Commands {
+pub enum Commands {
     _Reload(String)
 }
 
-async fn watch_fifo(_sender: mpsc::Sender<Commands>) {
+pub async fn start() {
+    let (sender, _receiver) = mpsc::channel(16);
+
+    let mut proxy = Proxy::new(41235, 41234).await.expect(":(");
+    let a = proxy.listen();
+    let b = watch_fifo(sender.clone());
+
+    tokio::join!(a, b);
+}
+
+pub(crate) async fn watch_fifo(_sender: mpsc::Sender<Commands>) {
     let _ = unix_named_pipe::create(FIFO, None);
 
     let fd = File::open(FIFO).await.unwrap();
@@ -46,20 +54,32 @@ async fn watch_fifo(_sender: mpsc::Sender<Commands>) {
         let bytes_read = reader.read_line(&mut buf).await.unwrap();
 
         if bytes_read != 0 {
-            // TODO: read buffer, match, send message
-            print!("{}", buf);
+            let splitbuf: Vec<&str> = buf.splitn(2, " ").collect();
+
+            let command = {
+                if splitbuf.len() >= 1 {
+                    splitbuf[0]
+                } else {
+                    buf.clear();
+                    continue;
+                }
+            };
+
+
+
+            match command {
+                "reload" => {
+                    if splitbuf.len() == 2 {
+                        // call function with argument
+                        let arg = splitbuf[1];
+                        println!("{}, {}", command, arg);
+                    } else {
+                        // TODO: log error
+                    }
+                }
+                _ => { /* log error */}
+            }
             buf.clear();
         }
     }
-}
-
-#[tokio::main]
-async fn main() {
-    let (sender, _receiver) = mpsc::channel(16);
-
-    let mut proxy = Proxy::new(41235, 41234).await.expect(":(");
-    let a = proxy.listen();
-    let b = watch_fifo(sender.clone());
-
-    tokio::join!(a, b);
 }
