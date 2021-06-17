@@ -40,9 +40,33 @@ struct Service {
     port: u16,
 
     on_start: String,
-    on_reload: Option<String>,
-    on_restart: Option<String>, // defaults to stop; start
-    on_stop: Option<String>, // defaults to kill <pid>
+    on_reload: Option<Vec<String>>,
+    on_stop: Option<Vec<String>>, // defaults to kill <pid>
+}
+
+impl Service {
+    pub fn to_systemd_service(&self) -> systemd_unit::Service {
+        systemd_unit::Service {
+            unit: systemd_unit::Unit {
+                name: self.qualified_name.clone(),
+                requires: None, // TODO: require dorc
+                // source_path: String::from(format!("/etc/dorc/apps/{}.toml", original_name)),
+                ..systemd_unit::Unit::default()
+            },
+            install: systemd_unit::Install {
+                wanted_by: Some(vec!["multi-user.target".to_string()]), // launch when networks are up
+                ..systemd_unit::Install::default()
+            },
+            exec: systemd_unit::Exec {
+                working_directory: Some(std::path::PathBuf::from(&self.working_dir)), // TODO:
+                ..systemd_unit::Exec::default()
+            },
+            exec_start: Some(vec![self.on_start.clone()]),
+            exec_reload: self.on_reload.clone(),
+            exec_stop: self.on_stop.clone(),
+            .. systemd_unit::Service::default()
+        }
+    }
 }
 
 
@@ -67,7 +91,7 @@ impl Service {
 
         let on_start = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Start command")
-            .default(format!("/usr/local/bin/{}", qualified_name))
+            .default(format!("{} -p {}", qualified_name, port))
             .show_default(true)
             .interact_text()
             .unwrap();
@@ -85,21 +109,13 @@ impl Service {
             .interact_text()
             .unwrap();
 
-        let on_restart: String = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("Restart command")
-            .allow_empty(true)
-            .interact_text()
-            .unwrap();
-
-
         Self {
             qualified_name,
             working_dir,
             port,
             on_start,
-            on_reload: Some(on_reload),
-            on_restart: Some(on_restart),
-            on_stop: Some(on_stop)
+            on_reload: Some(vec![on_reload]),
+            on_stop: Some(vec![on_stop])
         }
     }
 }
@@ -116,6 +132,8 @@ struct App {
 
 
 fn register() {
+    sudo::escalate_if_needed().expect("Higher privilege required to write service files.");
+
     let app_name: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("App name")
         .validate_with(AppNameValidator)
@@ -136,18 +154,9 @@ fn register() {
         .interact_text()
         .unwrap();
 
-    // let strategies = [
-    //     "None",
-    //     "Blue/Green",
-    // ];
-    //
-    // let _deploy_strategy: usize = Select::with_theme(&ColorfulTheme::default())
-    //     .with_prompt("Deployment strategy")
-    //     .default(0)
-    //     .items(&strategies[..])
-    //     .interact()
-    //     .unwrap();
-    // TODO: match deployment strategies
+    println!();
+    println!("This tool is for {}/{} deployments.", style("blue").blue(), style("green").green());
+    println!("Let's configure {}'s sub-services.", style(&app_name).yellow().bold());
 
     let blue_service_name = format!("blue-{}", app_name);
     println!("{}", style(format!("\nConfiguring '{}'", blue_service_name)).blue().bold());
@@ -156,9 +165,6 @@ fn register() {
     let green_service_name = format!("green-{}", app_name);
     println!("{}", style(format!("\nConfiguring '{}'", green_service_name)).green().bold());
     let green_service = Service::from_stdin(green_service_name);
-
-    // now that we have our application _defined_,
-    // we can save this configuration in /etc/dorc/apps/{app-name}.toml
 
     let app = App {
         app_name,
@@ -186,9 +192,17 @@ fn register() {
         });
 
         std::fs::copy(app.release_bin.as_str(), format!("/usr/local/bin/{}", &service.qualified_name));
+
+        let sysdservice = service.to_systemd_service();
+        std::fs::write(format!("/etc/systemd/system/{}.service", service.qualified_name), sysdservice.to_string());
+
+        std::process::Command::new("systemctl").args(&["start", &service.qualified_name]).output().expect("failed to start");
+        std::process::Command::new("systemctl").args(&["enable", &service.qualified_name]).output().expect("failed to enable");
     }
 
-    // TODO: create systemd service files and start the services
+    println!("\nDone! {} has been registered with two services.", style(&app.app_name).yellow().bold());
+
+    println!("Thanks for using dorc!~");
 }
 
 #[tokio::main]

@@ -1,0 +1,8 @@
+[Unit]
+Description=devin's orchestrator - a stupid deployment utility
+
+[Service]
+ExecStart=dorc start-daemon
+
+[Install]
+WantedBy=multi-user.target

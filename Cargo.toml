@@ -10,6 +10,7 @@ description = "devin's orchestrator - a stupid deployment utility"
 [dependencies]
 structopt = "0.3.21"
 dialoguer = "0.8.0"
+sudo = "0.6.0"
 
 unix-named-pipe = "0.2.0"
 
@@ -20,3 +21,10 @@ toml = "0.5.8"
 serde = "1.0.126"
 serde_derive = "1.0"
 fs_extra = "1.2.0"
+
+systemd_unit = "0.0.3"
+
+
+[package.metadata.deb]
+maintainer-scripts = "debian/"
+systemd-units = { enable = true }
