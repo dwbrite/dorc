@@ -126,6 +126,7 @@ dependencies = [
 name = "dorc"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dialoguer",
  "fs_extra",
  "futures",

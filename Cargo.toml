@@ -24,6 +24,8 @@ fs_extra = "1.2.0"
 
 systemd_unit = "0.0.3"
 
+anyhow = "1.0.41"
+
 
 [package.metadata.deb]
 maintainer-scripts = "debian/"

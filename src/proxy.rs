@@ -38,7 +38,6 @@ impl Proxy {
 }
 
 async fn transfer(mut inbound: TcpStream, proxy_addr: String) -> Result<(), Box<dyn Error>> {
-    println!("transfer: {:?}", inbound);
     let mut outbound = TcpStream::connect(proxy_addr).await?;
 
     let (mut ri, mut wi) = inbound.split();

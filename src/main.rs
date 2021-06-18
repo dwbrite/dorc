@@ -17,6 +17,9 @@ use serde::Serialize;
 use std::fs::{create_dir_all, File};
 use fs_extra::dir::CopyOptions;
 
+use anyhow::Result;
+use std::collections::HashMap;
+
 
 #[derive(Debug, PartialEq, StructOpt)]
 #[structopt(name = "dorc", about = "devin's orchestrator - a stupid deployment utility")]
@@ -125,10 +128,50 @@ struct App {
     app_name: String,
     release_dir: String,
     release_bin: String,
-    // TODO: deploy strategy
-    subservices: Vec<Service>,
+    listen_port: u16,
+
+    active_service: String,
+
+    subservices: HashMap<String, Service>,
 }
 
+impl App {
+    fn load(app_name: String) -> Result<App> {
+        let toml = std::fs::read_to_string(format!("/etc/dorc/apps/{}.toml", app_name))?;
+        let result: App = toml::from_str(&toml)?;
+        Ok(result)
+    }
+
+    fn save(&self) {
+        let toml = toml::to_string(&self).unwrap();
+        create_dir_all("/etc/dorc/apps").expect("Could not create /etc/dorc/apps/");
+        std::fs::write(format!("/etc/dorc/apps/{}.toml", self.app_name), toml).expect("Could not write to toml file");
+    }
+
+    fn reconstruct_subservice(&self, service: &Service) {
+        // ignore error
+        std::process::Command::new("systemctl").args(&["stop", &service.qualified_name]).output();
+
+        // TODO: clear dir before copy
+
+        fs_extra::dir::copy(&self.release_dir, &service.working_dir, &CopyOptions {
+            overwrite: true,
+            skip_exist: false,
+            buffer_size: 64000,
+            copy_inside: true,
+            content_only: false,
+            depth: 0
+        });
+
+        std::fs::copy(self.release_bin.as_str(), format!("/usr/local/bin/{}", &service.qualified_name));
+
+        let sysdservice = service.to_systemd_service();
+        std::fs::write(format!("/etc/systemd/system/{}.service", service.qualified_name), sysdservice.to_string());
+
+        std::process::Command::new("systemctl").args(&["start", &service.qualified_name]).output().expect("failed to start");
+        std::process::Command::new("systemctl").args(&["enable", &service.qualified_name]).output().expect("failed to enable");
+    }
+}
 
 
 fn register() {
@@ -154,50 +197,42 @@ fn register() {
         .interact_text()
         .unwrap();
 
+    let listen_port: u16 = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Listen port")
+        .validate_with(AddressValidator)
+        .interact_text()
+        .unwrap().parse().unwrap();
+
     println!();
     println!("This tool is for {}/{} deployments.", style("blue").blue(), style("green").green());
     println!("Let's configure {}'s sub-services.", style(&app_name).yellow().bold());
 
     let blue_service_name = format!("blue-{}", app_name);
     println!("{}", style(format!("\nConfiguring '{}'", blue_service_name)).blue().bold());
-    let blue_service = Service::from_stdin(blue_service_name);
+    let blue_service = Service::from_stdin(blue_service_name.clone());
 
     let green_service_name = format!("green-{}", app_name);
     println!("{}", style(format!("\nConfiguring '{}'", green_service_name)).green().bold());
-    let green_service = Service::from_stdin(green_service_name);
+    let green_service = Service::from_stdin(green_service_name.clone());
+
+    let mut subservices = HashMap::new();
+    subservices.insert(green_service_name.clone(), green_service);
+    subservices.insert(blue_service_name.clone(), blue_service);
 
     let app = App {
         app_name,
         release_dir,
         release_bin,
-        subservices: vec![blue_service, green_service]
+        listen_port,
+        active_service: green_service_name.clone(),
+        subservices,
     };
 
-    // TODO: error instead of crash in all of these
-
-    // save app config
-    let toml = toml::to_string(&app).unwrap();
-    create_dir_all("/etc/dorc/apps").expect("Could not create /etc/dorc/apps/");
-    std::fs::write(format!("/etc/dorc/apps/{}.toml", app.app_name), toml).expect("Could not write to toml file");
+    app.save();
 
     // move release files to relevant subservice locations
-    for service in app.subservices {
-        fs_extra::dir::copy(&app.release_dir, &service.working_dir, &CopyOptions {
-            overwrite: true,
-            skip_exist: false,
-            buffer_size: 64000,
-            copy_inside: true,
-            content_only: false,
-            depth: 0
-        });
-
-        std::fs::copy(app.release_bin.as_str(), format!("/usr/local/bin/{}", &service.qualified_name));
-
-        let sysdservice = service.to_systemd_service();
-        std::fs::write(format!("/etc/systemd/system/{}.service", service.qualified_name), sysdservice.to_string());
-
-        std::process::Command::new("systemctl").args(&["start", &service.qualified_name]).output().expect("failed to start");
-        std::process::Command::new("systemctl").args(&["enable", &service.qualified_name]).output().expect("failed to enable");
+    for (_, service) in &app.subservices {
+        app.reconstruct_subservice(&service);
     }
 
     println!("\nDone! {} has been registered with two services.", style(&app.app_name).yellow().bold());

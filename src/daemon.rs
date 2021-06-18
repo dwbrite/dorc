@@ -29,9 +29,14 @@ pub enum Commands {
 }
 
 pub async fn start() {
+    // TODO: watch the app files
+    // TODO: watch app release-dir + bin, copy to inactive
+
     let (sender, _receiver) = mpsc::channel(16);
 
-    let mut proxy = Proxy::new(41235, 41234).await.expect(":(");
+    let app = crate::App::load("dwbrite.com".to_string()).expect("couldn't open app file");
+
+    let mut proxy = Proxy::new(app.listen_port, app.subservices.get(&app.active_service).unwrap().port).await.expect(":(");
     let a = proxy.listen();
     let b = watch_fifo(sender.clone());
 
@@ -72,7 +77,6 @@ pub(crate) async fn watch_fifo(_sender: mpsc::Sender<Commands>) {
                     if splitbuf.len() == 2 {
                         // call function with argument
                         let arg = splitbuf[1];
-                        println!("{}, {}", command, arg);
                     } else {
                         // TODO: log error
                     }
