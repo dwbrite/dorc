@@ -65,7 +65,7 @@ impl Daemon {
     }
 
     fn recv_commands(&mut self) {
-        if let Ok(command) = self.receiver.recv() {
+        if let Ok(command) = self.receiver.try_recv() {
             match command {
                 Commands::Reload(arg) => {
                     let path = PathBuf::from_str(&format!("{}/{}.toml", APPS_DIR, arg)).unwrap();
