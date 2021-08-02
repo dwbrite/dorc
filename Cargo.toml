@@ -18,9 +18,10 @@ tokio = { version = "1", features = ["full"]}
 futures = "0.3.15"
 
 toml = "0.5.8"
-serde = "1.0.126"
-serde_derive = "1.0"
+serde = "1"
+serde_derive = "1"
 fs_extra = "1.2.0"
+hotwatch = "0.4.5"
 
 systemd_unit = "0.0.3"
 
@@ -28,5 +29,5 @@ anyhow = "1.0.41"
 
 
 [package.metadata.deb]
-maintainer-scripts = "debian/"
+maintainer-scripts = "meta/debian/"
 systemd-units = { enable = true }

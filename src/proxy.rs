@@ -6,6 +6,7 @@ use futures::FutureExt;
 use std::error::Error;
 
 pub(crate) struct Proxy {
+    pub(crate) is_listening: bool,
     listener: TcpListener,
     route: String,
 }
@@ -15,23 +16,25 @@ impl Proxy {
     pub async fn new(listener_port: u16, server_port: u16) -> Result<Proxy, Box<dyn Error>> {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", listener_port)).await?;
         Ok(Proxy {
+            is_listening: false,
             listener,
-            route: format!("127.0.0.1:{}", server_port)
+            route: format!("127.0.0.1:{}", server_port),
         })
     }
 
-    pub fn _reroute_to(&mut self, server_port: u16) {
+    pub fn reroute_to(&mut self, server_port: u16) {
         self.route = format!("127.0.0.1:{}", server_port);
     }
 
     pub async fn listen(&mut self) {
+        self.is_listening = true;
         while let Ok((inbound, _)) = self.listener.accept().await {
             let transfer = transfer(inbound, self.route.clone()).map(|r| {
                 if let Err(e) = r {
+                    // TODO: log errors
                     println!("Failed to transfer; error={}", e);
                 }
             });
-
             tokio::spawn(transfer);
         }
     }
@@ -57,4 +60,3 @@ async fn transfer(mut inbound: TcpStream, proxy_addr: String) -> Result<(), Box<
 
     Ok(())
 }
-

@@ -7,10 +7,15 @@ impl Validator<String> for AppNameValidator {
 
     fn validate(&mut self, s: &String) -> Result<(), Self::Err> {
         if s.starts_with("-") {
-            return Err(String::from("Invalid app name. Service names must not start with `-`."));
+            return Err(String::from(
+                "Invalid app name. Service names must not start with `-`.",
+            ));
         }
 
-        if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.'){
+        if !s
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        {
             return Err(String::from("Invalid app name. Service names may contain only ascii-alphanumeric characters, '.', and '-'."));
         }
 
@@ -64,7 +69,9 @@ impl Validator<String> for AddressValidator {
         if let Ok(_) = s.parse::<u16>() {
             Ok(())
         } else {
-            Err(String::from("Could not parse into address. Only ports are supported."))
+            Err(String::from(
+                "Could not parse into address. Only ports are supported.",
+            ))
         }
     }
 }
