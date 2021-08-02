@@ -22,13 +22,13 @@ const APPS_DIR: &str = "/etc/dorc/apps/";
 
 struct ProxiedApp {
     app: App,
-    proxy: Proxy,
+    proxy: Arc<Mutex<Proxy>>,
 }
 
 impl ProxiedApp {
     fn from_app(app: App) -> ProxiedApp {
         let service_port = app.subservices.get(&app.active_service).unwrap().port;
-        let proxy = block_on(Proxy::new(app.listen_port, service_port)).unwrap();
+        let proxy = Arc::new(Mutex::new(block_on(Proxy::new(app.listen_port, service_port)).unwrap()));
 
         Self { app, proxy }
     }
@@ -86,36 +86,29 @@ impl Daemon {
     }
 
     async fn listen(&mut self) {
-        loop {
-            self.recv_commands();
+        self.recv_commands();
 
-            let apps = &mut self.apps;
+        let apps = &mut self.apps;
 
-            for (_, app) in apps {
-                if !app.proxy.is_listening {
-                    app.proxy.listen().await;
-                }
+        for (_, app) in apps {
+            let proxy = app.proxy.clone();
+
+            if !proxy.lock().await.is_listening {
+                let p1 = proxy.clone();
+                tokio::spawn(async move {
+                    let mut lock = p1.lock().await;
+                    lock.listen().await
+                });
             }
         }
     }
 
-    fn reroute_proxies(&mut self) {
+    async fn reroute_proxies(&mut self) {
         for (_, pa) in &mut self.apps {
-            let (app, proxy) = (&mut pa.app, &mut pa.proxy);
+            let (app, proxy) = (&mut pa.app, &mut pa.proxy.lock().await);
             proxy.reroute_to(app.subservices.get(&app.active_service).unwrap().port);
         }
     }
-}
-
-struct _Service {
-    qualified_name: String,
-    workspace: String, // defaults to /srv/www/<qualified-service-name>
-    port: u16,
-
-    on_start: String,
-    on_reload: Option<String>,
-    on_restart: Option<String>, // defaults to stop; start
-    on_stop: Option<String>,    // defaults to kill <pid>
 }
 
 pub enum Commands {
@@ -155,18 +148,19 @@ pub async fn start() {
                 }
                 _ => {}
             }
-            daemon.reroute_proxies();
+            block_on(daemon.reroute_proxies());
         })
         .expect("failed to watch file!");
 
     // TODO: watch app release-dir + bin, copy to inactive
     // TODO: make sure all apps are running
+    let a = watch_fifo(sender.clone());
+    tokio::join!(a);
 
-    let mut lock = daemon.lock().await;
-    let a = lock.listen();
-    let b = watch_fifo(sender.clone());
-
-    tokio::join!(a, b);
+    loop {
+        let mut d = daemon.lock().await;
+        d.listen().await;
+    }
 }
 
 pub(crate) async fn watch_fifo(sender: mpsc::Sender<Commands>) {
