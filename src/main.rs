@@ -284,10 +284,22 @@ fn register() {
 async fn main() {
     let opt: Opt = Opt::from_args();
 
+    configure_logging();
+
     match opt.subcommand {
-        Subcommands::StartDaemon => {
-            daemon::start().await;
-        }
-        Subcommands::Register => register(),
+        Subcommands::StartDaemon => { daemon::start().await; }
+        Subcommands::Register => { register(); }
     }
+}
+
+fn configure_logging() {
+    let mut fern = fern::Dispatch::new();
+
+    if cfg!(debug_assertions) {
+        fern = fern.level(log::LevelFilter::Debug);
+    } else {
+        fern = fern.level(log::LevelFilter::Info);
+    }
+
+    fern.chain(std::io::stdout()).apply().unwrap();
 }

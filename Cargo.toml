@@ -8,23 +8,31 @@ description = "devin's orchestrator - a stupid deployment utility"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# registration frontend
 structopt = "0.3.21"
 dialoguer = "0.8.0"
 sudo = "0.6.0"
 
+# commands interface
 unix-named-pipe = "0.2.0"
 
+# generic async
 tokio = { version = "1", features = ["full"]}
 futures = "0.3.15"
 
+# serde
 toml = "0.5.8"
 serde = "1"
 serde_derive = "1"
+systemd_unit = "0.0.3"
+
+# file handling
 fs_extra = "1.2.0"
 hotwatch = "0.4.5"
 
-systemd_unit = "0.0.3"
-
+# logging / errors
+log = "0.4"
+fern = "0.6"
 anyhow = "1.0.41"
 
 

@@ -134,9 +134,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dialoguer",
+ "fern",
  "fs_extra",
  "futures",
  "hotwatch",
+ "log",
  "serde",
  "serde_derive",
  "structopt",
@@ -172,6 +174,15 @@ checksum = "14ca354e36190500e1e1fb267c647932382b54053c50b14970856c0b00a35067"
 dependencies = [
  "gcc",
  "libc",
+]
+
+[[package]]
+name = "fern"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c9a4820f0ccc8a7afd67c39a0f1a0f4b07ca1725164271a64939d7aeb9af065"
+dependencies = [
+ "log",
 ]
 
 [[package]]

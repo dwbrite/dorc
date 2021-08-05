@@ -14,6 +14,7 @@ use tokio::fs::File;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 use tokio::time;
+use log::{debug, error, info, warn};
 
 // TODO: remove unnecessary unwraps (you know, do _actual_ error handling)
 
@@ -23,6 +24,7 @@ const APPS_DIR: &str = "/etc/dorc/apps/";
 struct ProxiedApp {
     app: App,
     proxy: Arc<Mutex<Proxy>>,
+    is_listening: bool,
 }
 
 impl ProxiedApp {
@@ -30,7 +32,7 @@ impl ProxiedApp {
         let service_port = app.subservices.get(&app.active_service).unwrap().port;
         let proxy = Arc::new(Mutex::new(block_on(Proxy::new(app.listen_port, service_port)).unwrap()));
 
-        Self { app, proxy }
+        Self { app, proxy, is_listening: false }
     }
 }
 
@@ -66,18 +68,23 @@ impl Daemon {
 
     fn recv_commands(&mut self) {
         if let Ok(command) = self.receiver.try_recv() {
+            info!("Received {:?}", command);
             match command {
                 Commands::Reload(arg) => {
                     let path = PathBuf::from_str(&format!("{}/{}.toml", APPS_DIR, arg)).unwrap();
+                    // TODO: use a string instead of a path. That was a bad design decision based on being lazy.
+                    // TODO: handle error when file isn't in app...
                     let app = &self.apps.get(&path).unwrap().app;
-                    match &app.subservices.get(&app.app_name) {
+
+                    match &app.subservices.get(&app.active_service) {
                         None => {}
                         Some(service) => {
-                            // :shrugs:
                             std::process::Command::new("systemctl")
                                 .args(&["reload", &service.qualified_name])
                                 .output()
                                 .expect("failed to enable");
+
+                            info!("'{}' has been reloaded.", service.qualified_name);
                         }
                     }
                 }
@@ -92,12 +99,11 @@ impl Daemon {
 
         for (_, app) in apps {
             let proxy = app.proxy.clone();
-
-            if !proxy.lock().await.is_listening {
+            if !app.is_listening {
                 let p1 = proxy.clone();
                 tokio::spawn(async move {
                     let mut lock = p1.lock().await;
-                    lock.listen().await
+                    lock.listen().await;
                 });
             }
         }
@@ -111,20 +117,22 @@ impl Daemon {
     }
 }
 
+#[derive(Debug)]
 pub enum Commands {
     Reload(String),
 }
 
 pub async fn start() {
     let (sender, receiver) = mpsc::channel();
-
     let daemon = Arc::new(Mutex::new(Daemon::new(receiver)));
-
     let d1 = daemon.clone();
     let mut hotwatch = Hotwatch::new().expect("hotwatch failed to initialize!");
     hotwatch
         .watch("/etc/dorc/apps/", move |event: Event| {
+            debug!("Hotwatch found changed files. Handling event: {:?}", &event);
+            debug!("Locking daemon guard...");
             let mut daemon = block_on(d1.lock());
+            debug!("Daemon locked.");
             match event {
                 DebouncedEvent::Remove(p) => {
                     daemon.apps.remove(&p);
@@ -135,16 +143,23 @@ pub async fn start() {
                         daemon
                             .apps
                             .insert(p.clone(), ProxiedApp::from_app(app.unwrap()));
+                    } else {
+                        warn!("Application deserialization failed on '{}' -- Only dorc's .toml files should be placed here.", p.to_str().unwrap())
                     }
                 }
                 DebouncedEvent::Rename(a, b) => {
                     let app = App::load(&b);
+                    // for now, the app needs to be removed first so that there's no port conflicts
+                    // TODO: intelligently reroute proxies if the listen ports are identical
+                    daemon.apps.remove(&a);
                     if app.is_ok() {
                         daemon
                             .apps
                             .insert(b.clone(), ProxiedApp::from_app(app.unwrap()));
+                    } else {
+                        warn!("Application deserialization failed on '{}' -- Only dorc's .toml files should be placed here.", b.to_str().unwrap())
                     }
-                    daemon.apps.remove(&a);
+                    info!("'{}' renamed to '{}'. There may be a brief service interruption.", a.to_str().unwrap(), b.to_str().unwrap());
                 }
                 _ => {}
             }
@@ -154,16 +169,20 @@ pub async fn start() {
 
     // TODO: watch app release-dir + bin, copy to inactive
     // TODO: make sure all apps are running
-    let a = watch_fifo(sender.clone());
-    tokio::join!(a);
+
+    tokio::spawn(watch_fifo(sender.clone()));
+
+    let mut interval = time::interval(time::Duration::from_secs(2));
 
     loop {
+        interval.tick().await;
         let mut d = daemon.lock().await;
         d.listen().await;
     }
 }
 
 pub(crate) async fn watch_fifo(sender: mpsc::Sender<Commands>) {
+    debug!("Watching FIFO command file...");
     let _ = unix_named_pipe::create(FIFO, None);
 
     let fd = File::open(FIFO).await.unwrap();
@@ -175,7 +194,6 @@ pub(crate) async fn watch_fifo(sender: mpsc::Sender<Commands>) {
 
     loop {
         interval.tick().await;
-
         let bytes_read = reader.read_line(&mut buf).await.unwrap();
 
         if bytes_read != 0 {
@@ -195,13 +213,14 @@ pub(crate) async fn watch_fifo(sender: mpsc::Sender<Commands>) {
                     if splitbuf.len() == 2 {
                         let arg = splitbuf[1];
                         sender
-                            .send(Commands::Reload(arg.to_string()))
+                            .send(Commands::Reload(arg.to_string().trim().to_string()))
                             .expect("failed to send reload");
                     } else {
-                        // TODO: log error
+                        // TODO: include instructions for using FIFO commands
+                        error!("Too many arguments on reload command.");
                     }
                 }
-                _ => { /* log error */ }
+                _ => error!("{} is not a valid command.", command)
             }
             buf.clear();
         }
