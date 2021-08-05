@@ -15,6 +15,7 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 use tokio::time;
 use log::{debug, error, info, warn};
+use std::time::Duration;
 
 // TODO: remove unnecessary unwraps (you know, do _actual_ error handling)
 
@@ -24,7 +25,6 @@ const APPS_DIR: &str = "/etc/dorc/apps/";
 struct ProxiedApp {
     app: App,
     proxy: Arc<Mutex<Proxy>>,
-    is_listening: bool,
 }
 
 impl ProxiedApp {
@@ -32,7 +32,7 @@ impl ProxiedApp {
         let service_port = app.subservices.get(&app.active_service).unwrap().port;
         let proxy = Arc::new(Mutex::new(block_on(Proxy::new(app.listen_port, service_port)).unwrap()));
 
-        Self { app, proxy, is_listening: false }
+        Self { app, proxy }
     }
 }
 
@@ -95,15 +95,12 @@ impl Daemon {
     async fn listen(&mut self) {
         self.recv_commands();
 
-        let apps = &mut self.apps;
-
-        for (_, app) in apps {
-            let proxy = app.proxy.clone();
-            if !app.is_listening {
-                let p1 = proxy.clone();
+        for (_, app) in &mut self.apps {
+            if !app.proxy.lock().await.is_listening {
+                let tmp1 = app.proxy.clone();
                 tokio::spawn(async move {
-                    let mut lock = p1.lock().await;
-                    lock.listen().await;
+                    let tmp2 = tmp1.clone();
+                    Proxy::listen(tmp2).await;
                 });
             }
         }
@@ -130,9 +127,7 @@ pub async fn start() {
     hotwatch
         .watch("/etc/dorc/apps/", move |event: Event| {
             debug!("Hotwatch found changed files. Handling event: {:?}", &event);
-            debug!("Locking daemon guard...");
             let mut daemon = block_on(d1.lock());
-            debug!("Daemon locked.");
             match event {
                 DebouncedEvent::Remove(p) => {
                     daemon.apps.remove(&p);
@@ -151,6 +146,7 @@ pub async fn start() {
                     let app = App::load(&b);
                     // for now, the app needs to be removed first so that there's no port conflicts
                     // TODO: intelligently reroute proxies if the listen ports are identical
+                    // TODO: make sure the listener threads are dead before inserting?
                     daemon.apps.remove(&a);
                     if app.is_ok() {
                         daemon
@@ -172,7 +168,7 @@ pub async fn start() {
 
     tokio::spawn(watch_fifo(sender.clone()));
 
-    let mut interval = time::interval(time::Duration::from_secs(2));
+    let mut interval = time::interval(time::Duration::from_millis(20));
 
     loop {
         interval.tick().await;

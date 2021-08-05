@@ -4,10 +4,16 @@ use tokio::net::{TcpListener, TcpStream};
 
 use futures::FutureExt;
 use std::error::Error;
+use log::{debug, trace, info, error, warn};
+use tokio::sync::Mutex;
+use std::sync::Arc;
+use tokio::time::timeout_at;
+use std::time::Duration;
 
 pub(crate) struct Proxy {
-    listener: TcpListener,
+    pub(crate) listener: TcpListener,
     pub(crate) route: String,
+    pub(crate) is_listening: bool,
 }
 
 // largely taken from tokio's proxy example
@@ -17,6 +23,7 @@ impl Proxy {
         Ok(Proxy {
             listener,
             route: format!("127.0.0.1:{}", server_port),
+            is_listening: false
         })
     }
 
@@ -24,16 +31,31 @@ impl Proxy {
         self.route = format!("127.0.0.1:{}", server_port);
     }
 
-    pub async fn listen(&mut self) {
-        while let Ok((inbound, _)) = self.listener.accept().await {
-            let transfer = transfer(inbound, self.route.clone()).map(|r| {
-                if let Err(e) = r {
-                    // TODO: log errors
-                    println!("Failed to transfer; error={}", e);
+    pub async fn listen(s: Arc<Mutex<Proxy>>) {
+        Proxy::set_is_listening(s.clone(), true);
+        // Lock proxy for up to 500ms at a time, allowing it to be modified between loops
+        let mut ok = true;
+        while ok {
+            let guard = s.lock().await;
+            if let Ok(result) = tokio::time::timeout(Duration::from_millis(500), guard.listener.accept()).await {
+                ok = result.is_ok();
+
+                if let Ok((inbound, _)) = result {
+                    let transfer = transfer(inbound, guard.route.clone()).map(|r| {
+                        if let Err(e) = r {
+                            error!("Failed to transfer; error={}", e);
+                        }
+                    });
+                    tokio::spawn(transfer);
                 }
-            });
-            tokio::spawn(transfer);
+            }
         }
+        Proxy::set_is_listening(s.clone(), false);
+    }
+
+    pub async fn set_is_listening(s: Arc<Mutex<Proxy>>, b: bool) {
+        let mut guard = s.lock().await;
+        guard.is_listening = b;
     }
 }
 
