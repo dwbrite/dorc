@@ -7,7 +7,6 @@ use std::error::Error;
 use log::{debug, trace, info, error, warn};
 use tokio::sync::Mutex;
 use std::sync::Arc;
-use tokio::time::timeout_at;
 use std::time::Duration;
 
 pub(crate) struct Proxy {
@@ -32,7 +31,7 @@ impl Proxy {
     }
 
     pub async fn listen(s: Arc<Mutex<Proxy>>) {
-        Proxy::set_is_listening(s.clone(), true);
+        Proxy::set_is_listening(s.clone(), true).await;
         // Lock proxy for up to 500ms at a time, allowing it to be modified between loops
         let mut ok = true;
         while ok {
@@ -50,7 +49,7 @@ impl Proxy {
                 }
             }
         }
-        Proxy::set_is_listening(s.clone(), false);
+        Proxy::set_is_listening(s.clone(), false).await;
     }
 
     pub async fn set_is_listening(s: Arc<Mutex<Proxy>>, b: bool) {

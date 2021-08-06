@@ -1,23 +1,28 @@
 #![feature(async_closure)]
 
-mod daemon;
-mod proxy;
-mod validators;
-
-use dialoguer::console::style;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::Input;
-use fs_extra::dir::CopyOptions;
-use serde::Serialize;
-use serde_derive::*;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::create_dir_all;
 use std::path::Path;
-use structopt::StructOpt;
-use validators::*;
 
 use anyhow::Result;
-use std::collections::HashMap;
+use dialoguer::console::style;
+use dialoguer::Input;
+use dialoguer::theme::ColorfulTheme;
+use fs_extra::dir::CopyOptions;
+use serde::Serialize;
+use serde_derive::*;
+use structopt::StructOpt;
+
+use registration::validators::*;
+use registration::types::Service;
+use std::io;
+use fs_extra::error::Error;
+use std::io::ErrorKind;
+use log::*;
+
+mod registration;
+mod daemon;
 
 #[derive(Debug, PartialEq, StructOpt)]
 #[structopt(
@@ -33,92 +38,6 @@ struct Opt {
 enum Subcommands {
     Register,
     StartDaemon,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Service {
-    qualified_name: String,
-    working_dir: String, // defaults to /srv/www/<qualified-service-name>
-    port: u16,
-
-    on_start: String,
-    on_reload: Option<Vec<String>>,
-    on_stop: Option<Vec<String>>, // defaults to kill <pid>
-}
-
-impl Service {
-    pub fn to_systemd_service(&self) -> systemd_unit::Service {
-        systemd_unit::Service {
-            unit: systemd_unit::Unit {
-                name: self.qualified_name.clone(),
-                requires: None, // TODO: require dorc
-                // source_path: String::from(format!("/etc/dorc/apps/{}.toml", original_name)),
-                ..systemd_unit::Unit::default()
-            },
-            install: systemd_unit::Install {
-                wanted_by: Some(vec!["multi-user.target".to_string()]), // launch when networks are up
-                ..systemd_unit::Install::default()
-            },
-            exec: systemd_unit::Exec {
-                working_directory: Some(std::path::PathBuf::from(&self.working_dir)), // TODO:
-                ..systemd_unit::Exec::default()
-            },
-            exec_start: Some(vec![self.on_start.clone()]),
-            exec_reload: self.on_reload.clone(),
-            exec_stop: self.on_stop.clone(),
-            ..systemd_unit::Service::default()
-        }
-    }
-}
-
-impl Service {
-    fn from_stdin(qualified_name: String) -> Self {
-        let working_dir = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("Working dir")
-            .default(format!("/etc/dorc/service-data/{}", qualified_name))
-            .show_default(true)
-            .validate_with(LocationValidator)
-            .interact_text()
-            .unwrap();
-
-        // TODO: print helper text here
-        let port_str: String = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("Service address")
-            .validate_with(AddressValidator)
-            .interact_text()
-            .unwrap();
-
-        let port = port_str.parse().unwrap();
-
-        let on_start = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("Start command")
-            .default(format!("{} -p {}", qualified_name, port))
-            .show_default(true)
-            .interact_text()
-            .unwrap();
-
-        let on_stop: String = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("Stop command")
-            .default(format!("killall {}", qualified_name))
-            .show_default(true)
-            .interact_text()
-            .unwrap();
-
-        let on_reload: String = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt("Reload command")
-            .allow_empty(true)
-            .interact_text()
-            .unwrap();
-
-        Self {
-            qualified_name,
-            working_dir,
-            port,
-            on_start,
-            on_reload: Some(vec![on_reload]),
-            on_stop: Some(vec![on_stop]),
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -147,14 +66,13 @@ impl App {
             .expect("Could not write to toml file");
     }
 
-    fn reconstruct_subservice(&self, service: &Service) {
-        // ignore error
+    fn migrate_service(&self, service: &Service) -> Result<()>{
         std::process::Command::new("systemctl")
             .args(&["stop", &service.qualified_name])
-            .output()
-            .unwrap();
+            .output()?;
 
-        // TODO: clear dir before copy
+        // Don't clear working directory here,
+        // users of dorc may want to store data in files that are subservice specific
 
         fs_extra::dir::copy(
             &self.release_dir,
@@ -167,30 +85,29 @@ impl App {
                 content_only: false,
                 depth: 0,
             },
-        )
-        .unwrap();
+        )?;
 
         std::fs::copy(
             self.release_bin.as_str(),
             format!("/usr/local/bin/{}", &service.qualified_name),
-        )
-        .unwrap();
+        )?;
 
         let sysdservice = service.to_systemd_service();
         std::fs::write(
             format!("/etc/systemd/system/{}.service", service.qualified_name),
             sysdservice.to_string(),
-        )
-        .unwrap();
+        )?;
 
         std::process::Command::new("systemctl")
             .args(&["start", &service.qualified_name])
-            .output()
-            .expect("failed to start");
+            .output()?;
         std::process::Command::new("systemctl")
             .args(&["enable", &service.qualified_name])
-            .output()
-            .expect("failed to enable");
+            .output()?;
+
+        // TODO: undo changes on failure? and/or fail early?
+
+        Ok(())
     }
 }
 
@@ -271,7 +188,14 @@ fn register() {
 
     // move release files to relevant subservice locations
     for (_, service) in &app.subservices {
-        app.reconstruct_subservice(&service);
+        match app.migrate_service(&service) {
+            Ok(_) => {
+                info!("successfully migrated files from {} to {} for {}", app.release_dir, service.working_dir, service.qualified_name);
+            }
+            Err(e) => {
+                error!("failed to migrate files for {} | {}", service.qualified_name, e);
+            }
+        }
     }
 
     println!(

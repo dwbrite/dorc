@@ -1,12 +1,13 @@
-use crate::proxy::Proxy;
+mod proxy;
+
+use crate::daemon::proxy::Proxy;
 use crate::App;
 use futures::executor::block_on;
-use hotwatch::notify::DebouncedEvent;
-use hotwatch::{Event, Hotwatch};
+use hotwatch::{Hotwatch};
 use std::collections::HashMap;
 use std::fs;
 use std::fs::DirEntry;
-use std::path::PathBuf;
+use std::path::{PathBuf};
 use std::str::FromStr;
 use std::sync::mpsc::Receiver;
 use std::sync::{mpsc, Arc};
@@ -15,7 +16,6 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 use tokio::time;
 use log::{debug, error, info, warn};
-use std::time::Duration;
 
 // TODO: remove unnecessary unwraps (you know, do _actual_ error handling)
 
@@ -32,6 +32,7 @@ impl ProxiedApp {
         let service_port = app.subservices.get(&app.active_service).unwrap().port;
         let proxy = Arc::new(Mutex::new(block_on(Proxy::new(app.listen_port, service_port)).unwrap()));
 
+
         Self { app, proxy }
     }
 }
@@ -39,13 +40,17 @@ impl ProxiedApp {
 struct Daemon {
     receiver: Receiver<Commands>,
     apps: HashMap<PathBuf, ProxiedApp>,
+    hotwatch: Hotwatch,
 }
 
 impl Daemon {
     fn new(rx: Receiver<Commands>) -> Self {
+        let hotwatch = Hotwatch::new().expect("hotwatch failed to initialize!");
+
         let mut d = Daemon {
             receiver: rx,
             apps: HashMap::new(),
+            hotwatch,
         };
 
         // get all ok files in dir
@@ -57,13 +62,22 @@ impl Daemon {
 
         d.apps = app_files
             .iter()
-            .filter_map(|file| match App::load(file.path()) {
-                Ok(app) => Some((file.path(), ProxiedApp::from_app(app))),
-                Err(_) => None,
+            .filter_map(|file| {
+                match App::load(file.path()) {
+                    Ok(app) => Some((file.path(), ProxiedApp::from_app(app))),
+                    Err(e) => {
+                        error!("Could not load file {} as app | {}", file.file_name().to_str().unwrap(), e);
+                        None
+                    },
+                }
             })
             .collect();
 
         d
+    }
+
+    fn load_app(&mut self) {
+
     }
 
     fn recv_commands(&mut self) {
@@ -92,6 +106,7 @@ impl Daemon {
         }
     }
 
+    // every few seconds this is called
     async fn listen(&mut self) {
         self.recv_commands();
 
@@ -121,10 +136,9 @@ pub enum Commands {
 
 pub async fn start() {
     let (sender, receiver) = mpsc::channel();
-    let daemon = Arc::new(Mutex::new(Daemon::new(receiver)));
-    let d1 = daemon.clone();
-    let mut hotwatch = Hotwatch::new().expect("hotwatch failed to initialize!");
-    hotwatch
+    let mut daemon = Daemon::new(receiver);
+    /// let's not hotwatch this dir - instead let's just call a command through the fifo fd
+/*    hotwatch
         .watch("/etc/dorc/apps/", move |event: Event| {
             debug!("Hotwatch found changed files. Handling event: {:?}", &event);
             let mut daemon = block_on(d1.lock());
@@ -161,7 +175,7 @@ pub async fn start() {
             }
             block_on(daemon.reroute_proxies());
         })
-        .expect("failed to watch file!");
+        .expect("failed to watch file!");*/
 
     // TODO: watch app release-dir + bin, copy to inactive
     // TODO: make sure all apps are running
@@ -172,8 +186,7 @@ pub async fn start() {
 
     loop {
         interval.tick().await;
-        let mut d = daemon.lock().await;
-        d.listen().await;
+        daemon.listen().await;
     }
 }
 
