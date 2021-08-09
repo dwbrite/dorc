@@ -19,7 +19,6 @@ impl Service {
             unit: systemd_unit::Unit {
                 name: self.qualified_name.clone(),
                 requires: None, // TODO: require dorc
-                // source_path: String::from(format!("/etc/dorc/apps/{}.toml", original_name)),
                 ..systemd_unit::Unit::default()
             },
             install: systemd_unit::Install {
@@ -27,7 +26,7 @@ impl Service {
                 ..systemd_unit::Install::default()
             },
             exec: systemd_unit::Exec {
-                working_directory: Some(std::path::PathBuf::from(&self.working_dir)), // TODO:
+                working_directory: Some(std::path::PathBuf::from(&self.working_dir)),
                 ..systemd_unit::Exec::default()
             },
             exec_start: Some(vec![self.on_start.clone()]),

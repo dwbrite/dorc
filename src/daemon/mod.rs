@@ -53,6 +53,10 @@ impl Daemon {
             hotwatch,
         };
 
+        d
+    }
+
+    fn load_all_apps(&mut self) {
         // get all ok files in dir
         let app_files: Vec<DirEntry> = fs::read_dir(APPS_DIR)
             .unwrap()
@@ -60,7 +64,7 @@ impl Daemon {
             .filter(|p| p.path().is_file())
             .collect();
 
-        d.apps = app_files
+        self.apps = app_files
             .iter()
             .filter_map(|file| {
                 match App::load(file.path()) {
@@ -72,12 +76,6 @@ impl Daemon {
                 }
             })
             .collect();
-
-        d
-    }
-
-    fn load_app(&mut self) {
-
     }
 
     fn recv_commands(&mut self) {
@@ -106,7 +104,6 @@ impl Daemon {
         }
     }
 
-    // every few seconds this is called
     async fn listen(&mut self) {
         self.recv_commands();
 
@@ -137,48 +134,10 @@ pub enum Commands {
 pub async fn start() {
     let (sender, receiver) = mpsc::channel();
     let mut daemon = Daemon::new(receiver);
-    /// let's not hotwatch this dir - instead let's just call a command through the fifo fd
-/*    hotwatch
-        .watch("/etc/dorc/apps/", move |event: Event| {
-            debug!("Hotwatch found changed files. Handling event: {:?}", &event);
-            let mut daemon = block_on(d1.lock());
-            match event {
-                DebouncedEvent::Remove(p) => {
-                    daemon.apps.remove(&p);
-                }
-                DebouncedEvent::Create(p) | DebouncedEvent::Write(p) => {
-                    let app = App::load(&p);
-                    if app.is_ok() {
-                        daemon
-                            .apps
-                            .insert(p.clone(), ProxiedApp::from_app(app.unwrap()));
-                    } else {
-                        warn!("Application deserialization failed on '{}' -- Only dorc's .toml files should be placed here.", p.to_str().unwrap())
-                    }
-                }
-                DebouncedEvent::Rename(a, b) => {
-                    let app = App::load(&b);
-                    // for now, the app needs to be removed first so that there's no port conflicts
-                    // TODO: intelligently reroute proxies if the listen ports are identical
-                    // TODO: make sure the listener threads are dead before inserting?
-                    daemon.apps.remove(&a);
-                    if app.is_ok() {
-                        daemon
-                            .apps
-                            .insert(b.clone(), ProxiedApp::from_app(app.unwrap()));
-                    } else {
-                        warn!("Application deserialization failed on '{}' -- Only dorc's .toml files should be placed here.", b.to_str().unwrap())
-                    }
-                    info!("'{}' renamed to '{}'. There may be a brief service interruption.", a.to_str().unwrap(), b.to_str().unwrap());
-                }
-                _ => {}
-            }
-            block_on(daemon.reroute_proxies());
-        })
-        .expect("failed to watch file!");*/
-
+    daemon.load_all_apps();
+    /// let's not hotwatch this dir - let's just call a command through the fifo fd
+    /// when applications are modified from dorc commands
     // TODO: watch app release-dir + bin, copy to inactive
-    // TODO: make sure all apps are running
 
     tokio::spawn(watch_fifo(sender.clone()));
 

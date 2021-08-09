@@ -10,6 +10,7 @@ pub mod validators;
 
 impl Service {
     pub(crate) fn from_stdin(qualified_name: String) -> Self {
+        // TODO: for any inputs using directories impl tab-completion.
         let working_dir = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Working dir")
             .default(format!("/etc/dorc/service-data/{}", qualified_name))
