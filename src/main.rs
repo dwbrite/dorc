@@ -111,6 +111,7 @@ enum Subcommands {
     StartDaemon,
 }
 
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct App {
     app_name: String,

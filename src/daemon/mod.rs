@@ -135,8 +135,8 @@ pub async fn start() {
     let (sender, receiver) = mpsc::channel();
     let mut daemon = Daemon::new(receiver);
     daemon.load_all_apps();
-    /// let's not hotwatch this dir - let's just call a command through the fifo fd
-    /// when applications are modified from dorc commands
+    // let's not hotwatch this dir - let's just call a command through the fifo fd
+    // when applications are modified from dorc commands
     // TODO: watch app release-dir + bin, copy to inactive
 
     tokio::spawn(watch_fifo(sender.clone()));
