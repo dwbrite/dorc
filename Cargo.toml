@@ -4,6 +4,9 @@ version = "0.0.1"
 authors = ["Devin Brite <devin@dwbrite.com>"]
 edition = "2018"
 description = "devin's orchestrator - a stupid deployment utility"
+repository = "https://github.com/dwbrite/dorc"
+license = "BSD-3-Clause-Attribution"
+documentation = "https://docs.rs/dorc"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
