@@ -15,7 +15,7 @@ use tokio::fs::File;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 use tokio::time;
-use log::{debug, error, info, warn};
+use log::*;
 
 // TODO: remove unnecessary unwraps (you know, do _actual_ error handling)
 
@@ -47,13 +47,11 @@ impl Daemon {
     fn new(rx: Receiver<Commands>) -> Self {
         let hotwatch = Hotwatch::new().expect("hotwatch failed to initialize!");
 
-        let mut d = Daemon {
+        Daemon {
             receiver: rx,
             apps: HashMap::new(),
             hotwatch,
-        };
-
-        d
+        }
     }
 
     fn load_all_apps(&mut self) {

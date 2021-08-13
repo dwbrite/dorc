@@ -4,7 +4,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use futures::FutureExt;
 use std::error::Error;
-use log::{debug, trace, info, error, warn};
+use log::*;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use std::time::Duration;

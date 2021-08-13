@@ -3,26 +3,21 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::create_dir_all;
+use std::{fs};
 use std::path::Path;
 
 use anyhow::Result;
-use dialoguer::console::style;
-use dialoguer::Input;
-use dialoguer::theme::ColorfulTheme;
 use fs_extra::dir::CopyOptions;
 use serde::Serialize;
 use serde_derive::*;
 use structopt::StructOpt;
 
-use registration::validators::*;
 use registration::types::Service;
-use std::io;
-use fs_extra::error::Error;
-use std::io::ErrorKind;
-use log::*;
 
 mod registration;
 mod daemon;
+
+const SERVICE_FILE_PATH: &str = "/usr/lib/systemd/system/dorc.service";
 
 #[derive(Debug, PartialEq, StructOpt)]
 #[structopt(
@@ -39,7 +34,6 @@ enum Subcommands {
     Register,
     StartDaemon,
 }
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct App {
@@ -112,99 +106,15 @@ impl App {
     }
 }
 
-fn register() {
-    sudo::escalate_if_needed().expect("Higher privilege required to write service files.");
-
-    let app_name: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("App name")
-        .validate_with(AppNameValidator)
-        .interact_text()
-        .unwrap();
-
-    let release_dir: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Release location")
-        .default(format!("/var/tmp/{}", app_name))
-        .show_default(true)
-        .validate_with(LocationValidator)
-        .interact_text()
-        .unwrap();
-
-    let release_bin: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Release executable")
-        .validate_with(FileValidator)
-        .interact_text()
-        .unwrap();
-
-    let listen_port: u16 = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Listen port")
-        .validate_with(AddressValidator)
-        .interact_text()
-        .unwrap()
-        .parse()
-        .unwrap();
-
-    println!();
-    println!(
-        "This tool is for {}/{} deployments.",
-        style("blue").blue(),
-        style("green").green()
-    );
-    println!(
-        "Let's configure {}'s sub-services.",
-        style(&app_name).yellow().bold()
-    );
-
-    let blue_service_name = format!("blue-{}", app_name);
-    println!(
-        "{}",
-        style(format!("\nConfiguring '{}'", blue_service_name))
-            .blue()
-            .bold()
-    );
-    let blue_service = Service::from_stdin(blue_service_name.clone());
-
-    let green_service_name = format!("green-{}", app_name);
-    println!(
-        "{}",
-        style(format!("\nConfiguring '{}'", green_service_name))
-            .green()
-            .bold()
-    );
-    let green_service = Service::from_stdin(green_service_name.clone());
-
-    let mut subservices = HashMap::new();
-    subservices.insert(green_service_name.clone(), green_service);
-    subservices.insert(blue_service_name.clone(), blue_service);
-
-    let app = App {
-        app_name,
-        release_dir,
-        release_bin,
-        listen_port,
-        active_service: green_service_name.clone(),
-        subservices,
-    };
-
-    app.save();
-
-    // move release files to relevant subservice locations
-    for (_, service) in &app.subservices {
-        match app.migrate_service(&service) {
-            Ok(_) => {
-                info!("successfully migrated files from {} to {} for {}", app.release_dir, service.working_dir, service.qualified_name);
-            }
-            Err(e) => {
-                error!("failed to migrate files for {} | {}", service.qualified_name, e);
-            }
-        }
+fn check_install() {
+    if Path::new(SERVICE_FILE_PATH).exists() {
+        return;
     }
 
-    println!(
-        "\nDone! {} has been registered with two services.",
-        style(&app.app_name).yellow().bold()
-    );
+    sudo::escalate_if_needed().expect("Higher privilege required to write service files.");
 
-    println!("Thanks for using dorc!~");
+    let service = include_str!("../meta/debian/dorc.service");
+    fs::write(SERVICE_FILE_PATH, service).unwrap();
 }
 
 #[tokio::main]
@@ -214,8 +124,8 @@ async fn main() {
     configure_logging();
 
     match opt.subcommand {
-        Subcommands::StartDaemon => { daemon::start().await; }
-        Subcommands::Register => { register(); }
+        Subcommands::StartDaemon => { check_install(); daemon::start().await; }
+        Subcommands::Register => { check_install(); registration::register(); }
     }
 }
 
