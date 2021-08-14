@@ -9,13 +9,14 @@ use std::fs;
 use std::fs::DirEntry;
 use std::path::{PathBuf};
 use std::str::FromStr;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc};
 use tokio::fs::File;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 use tokio::time;
 use log::*;
+use hotwatch::notify::DebouncedEvent;
 
 // TODO: remove unnecessary unwraps (you know, do _actual_ error handling)
 
@@ -38,19 +39,23 @@ impl ProxiedApp {
 }
 
 struct Daemon {
-    receiver: Receiver<Commands>,
     apps: HashMap<PathBuf, ProxiedApp>,
     hotwatch: Hotwatch,
+    cmd_tx: Sender<Commands>,
+    cmd_rx: Receiver<Commands>
 }
 
 impl Daemon {
-    fn new(rx: Receiver<Commands>) -> Self {
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::channel();
+
         let hotwatch = Hotwatch::new().expect("hotwatch failed to initialize!");
 
         Daemon {
-            receiver: rx,
             apps: HashMap::new(),
             hotwatch,
+            cmd_tx: sender,
+            cmd_rx: receiver
         }
     }
 
@@ -62,42 +67,36 @@ impl Daemon {
             .filter(|p| p.path().is_file())
             .collect();
 
-        self.apps = app_files
-            .iter()
-            .filter_map(|file| {
-                match App::load(file.path()) {
-                    Ok(app) => Some((file.path(), ProxiedApp::from_app(app))),
-                    Err(e) => {
-                        error!("Could not load file {} as app | {}", file.file_name().to_str().unwrap(), e);
-                        None
-                    },
-                }
-            })
-            .collect();
+        for app in app_files {
+            self.load_app(app.path());
+        }
+    }
+
+    fn hotwatch_release(&mut self, path: PathBuf) {
+        let sender = self.cmd_tx.clone();
+        let result = self.hotwatch.watch(path.clone(), move |event| {
+            match event {
+                DebouncedEvent::Error(e, p) => error!("error while watching {:?}: {}", p, e),
+                _ => sender.send(Commands::CopyRelease(path.clone())).unwrap()
+            }
+        });
+
+        if result.is_err() {
+            error!("failed to hotwatch: {}", result.err().unwrap());
+        }
     }
 
     fn recv_commands(&mut self) {
-        if let Ok(command) = self.receiver.try_recv() {
+        // TODO: should try_recv() be in a loop? or could that cause unwanted latency?
+        if let Ok(command) = self.cmd_rx.try_recv() {
             info!("Received {:?}", command);
             match command {
                 Commands::Reload(arg) => {
                     let path = PathBuf::from_str(&format!("{}/{}.toml", APPS_DIR, arg)).unwrap();
-                    // TODO: use a string instead of a path. That was a bad design decision based on being lazy.
-                    // TODO: handle error when file isn't in app...
-                    let app = &self.apps.get(&path).unwrap().app;
-
-                    match &app.subservices.get(&app.active_service) {
-                        None => {}
-                        Some(service) => {
-                            std::process::Command::new("systemctl")
-                                .args(&["reload", &service.qualified_name])
-                                .output()
-                                .expect("failed to enable");
-
-                            info!("'{}' has been reloaded.", service.qualified_name);
-                        }
-                    }
+                    self.reload_app(path);
                 }
+                Commands::Load(path) => self.load_app(PathBuf::from(path)),
+                Commands::CopyRelease(path) => self.copy_release(PathBuf::from(path))
             }
         }
     }
@@ -122,22 +121,69 @@ impl Daemon {
             proxy.reroute_to(app.subservices.get(&app.active_service).unwrap().port);
         }
     }
+
+    fn load_app(&mut self, path: PathBuf) {
+        match App::load(&path) {
+            Ok(app) => {
+                self.apps.insert(path.clone(), ProxiedApp::from_app(app)); // ignore old value
+                self.hotwatch_release(path.clone())
+            },
+            Err(e) => { error!("Could not load file {:?} as app | {}", path.file_name(), e); },
+        }
+    }
+
+    fn reload_app(&mut self, path: PathBuf) {
+        let opt_app = self.apps.get(&path);
+        if let None = opt_app {
+            error!("Failed to reload app from path: {:?}", path);
+            return;
+        }
+
+        let app = &opt_app.unwrap().app;
+        match &app.subservices.get(&app.active_service) {
+            None => {}
+            Some(service) => {
+                std::process::Command::new("systemctl")
+                    .args(&["reload", &service.qualified_name])
+                    .output()
+                    .expect("failed to enable");
+
+                info!("'{}' has been reloaded.", service.qualified_name);
+            }
+        }
+
+    }
+
+    fn copy_release(&mut self, path: PathBuf) {
+        let proxied_app = self.apps.get(&path).expect("Failed to copy release from an unloaded application");
+        let app = &proxied_app.app;
+        let active = app.active_service.clone();
+
+        // TODO: in the future I may want to have a smart pointer to the active an inactive service instead of using a hashmap+string
+        // copy files from inactive service
+        for (key, service) in &app.subservices {
+            if key.ne(&active) {
+                app.migrate_service(service);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
 pub enum Commands {
     Reload(String),
+    Load(String),
+    CopyRelease(PathBuf),
 }
 
 pub async fn start() {
-    let (sender, receiver) = mpsc::channel();
-    let mut daemon = Daemon::new(receiver);
+    let mut daemon = Daemon::new();
     daemon.load_all_apps();
     // let's not hotwatch this dir - let's just call a command through the fifo fd
     // when applications are modified from dorc commands
     // TODO: watch app release-dir + bin, copy to inactive
 
-    tokio::spawn(watch_fifo(sender.clone()));
+    tokio::spawn(watch_fifo(daemon.cmd_tx.clone()));
 
     let mut interval = time::interval(time::Duration::from_millis(20));
 
@@ -151,11 +197,11 @@ pub(crate) async fn watch_fifo(sender: mpsc::Sender<Commands>) {
     debug!("Watching FIFO command file...");
     let _ = unix_named_pipe::create(FIFO, None);
 
-    let fd = File::open(FIFO).await.unwrap();
+    let fd = File::open(FIFO).await.expect(&format!("Failed to open FIFO file descriptor {}", FIFO));
+
     let mut reader = tokio::io::BufReader::with_capacity(128, fd);
     let mut buf = String::new();
 
-    //
     let mut interval = time::interval(time::Duration::from_secs(5));
 
     loop {
