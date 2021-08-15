@@ -1,6 +1,5 @@
 #![feature(async_closure)]
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::create_dir_all;
 use std::{fs};
@@ -13,6 +12,10 @@ use serde_derive::*;
 use structopt::StructOpt;
 
 use registration::types::Service;
+use std::process::Command;
+
+use crate::daemon::FIFO;
+
 
 mod registration;
 mod daemon;
@@ -33,6 +36,8 @@ struct Opt {
 enum Subcommands {
     Register,
     StartDaemon,
+    Load { name: String },
+    Switch { name: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,9 +47,8 @@ pub(crate) struct App {
     release_bin: String,
     listen_port: u16,
 
-    active_service: String,
-
-    subservices: HashMap<String, Service>,
+    active_service: Service,
+    inactive_service: Service
 }
 
 impl App {
@@ -104,6 +108,11 @@ impl App {
 
         Ok(())
     }
+
+    fn swap_active(&mut self) {
+        std::mem::swap(&mut self.inactive_service, &mut self.active_service);
+    }
+
 }
 
 fn check_install() {
@@ -126,6 +135,21 @@ async fn main() {
     match opt.subcommand {
         Subcommands::StartDaemon => { check_install(); daemon::start().await; }
         Subcommands::Register => { check_install(); registration::register(); }
+        Subcommands::Load{name} => {
+            // is this code smell?
+            Command::new("sh")
+            .arg("-c")
+            .arg(format!("echo 'load {}' > {}", name, FIFO))
+            .output()
+            .expect("failed to execute process");
+        }
+        Subcommands::Switch{name} => {
+            Command::new("sh")
+                .arg("-c")
+                .arg(format!("echo 'switch {}' > {}", name, FIFO))
+                .output()
+                .expect("failed to execute process");
+        }
     }
 }
 

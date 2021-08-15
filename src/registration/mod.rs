@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use log::{info, error};
 
 use dialoguer::console::style;
@@ -124,23 +123,19 @@ pub fn register() {
     );
     let green_service = Service::from_stdin(green_service_name.clone());
 
-    let mut subservices = HashMap::new();
-    subservices.insert(green_service_name.clone(), green_service);
-    subservices.insert(blue_service_name.clone(), blue_service);
-
     let app = App {
         app_name,
         release_dir,
         release_bin,
         listen_port,
-        active_service: green_service_name.clone(),
-        subservices,
+        active_service: green_service,
+        inactive_service: blue_service,
     };
 
     app.save();
 
     // move release files to relevant subservice locations
-    for (_, service) in &app.subservices {
+    for service in &[&app.inactive_service, &app.active_service]  {
         match app.migrate_service(&service) {
             Ok(_) => {
                 info!("successfully migrated files from {} to {} for {}", app.release_dir, service.working_dir, service.qualified_name);
