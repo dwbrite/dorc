@@ -131,10 +131,11 @@ async fn main() {
     let opt: Opt = Opt::from_args();
 
     configure_logging();
+    check_install();
 
     match opt.subcommand {
-        Subcommands::StartDaemon => { check_install(); daemon::start().await; }
-        Subcommands::Register => { check_install(); registration::register(); }
+        Subcommands::StartDaemon => { daemon::start().await; }
+        Subcommands::Register => { registration::register(); }
         Subcommands::Load{name} => {
             // is this code smell?
             Command::new("sh")
