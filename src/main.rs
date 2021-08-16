@@ -138,6 +138,7 @@ async fn main() {
         Subcommands::Register => { registration::register(); }
         Subcommands::Load{name} => {
             // is this code smell?
+            // TODO: spawn an async thread and kill after 3 seconds.
             Command::new("sh")
             .arg("-c")
             .arg(format!("echo 'load {}' > {}", name, FIFO))

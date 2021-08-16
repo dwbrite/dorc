@@ -66,4 +66,5 @@ Happy deploying!
 
 ## Installing `dorc`
 
-Just run `cargo install dorc`! When you run a command with `dorc` for the first time, it will automatically install its SystemD service file.
+Just run `cargo install dorc`! When you run a command with `dorc` for the first time (e.g., `dorc register`) 
+it will automatically install its SystemD service file, which you can start with `systemctl start dorc`.

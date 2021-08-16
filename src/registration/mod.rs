@@ -7,6 +7,8 @@ use dialoguer::theme::ColorfulTheme;
 use crate::App;
 use crate::registration::types::Service;
 use crate::registration::validators::{AddressValidator, AppNameValidator, FileValidator, LocationValidator};
+use crate::daemon::FIFO;
+use std::process::Command;
 
 pub(crate) mod types;
 pub mod validators;
@@ -145,6 +147,23 @@ pub fn register() {
             }
         }
     }
+
+    // automatically load the service if the dorc daemon is running
+    let output = std::process::Command::new("systemctl")
+        .args(&["is-active", "dorc"])
+        .output()
+        .unwrap();
+
+    if output.stdout.eq("active".as_bytes()) {
+        println!("Attempting to load app in daemon...");
+        println!("If this command hangs, make sure the daemon is running successfully.");
+        Command::new("sh")
+            .arg("-c")
+            .arg(format!("echo 'load {}' > {}", app.app_name, FIFO))
+            .output()
+            .expect("failed to execute process");
+    }
+
 
     println!(
         "\nDone! {} has been registered with two services.",

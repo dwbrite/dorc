@@ -3,11 +3,11 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
 use futures::FutureExt;
-use std::error::Error;
 use log::*;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use std::time::Duration;
+use anyhow::*;
 
 pub(crate) struct Proxy {
     pub(crate) listener: TcpListener,
@@ -17,7 +17,7 @@ pub(crate) struct Proxy {
 
 // largely taken from tokio's proxy example
 impl Proxy {
-    pub async fn new(listener_port: u16, server_port: u16) -> Result<Proxy, Box<dyn Error>> {
+    pub async fn new(listener_port: u16, server_port: u16) -> Result<Proxy> {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", listener_port)).await?;
         Ok(Proxy {
             listener,
@@ -58,7 +58,7 @@ impl Proxy {
     }
 }
 
-async fn transfer(mut inbound: TcpStream, proxy_addr: String) -> Result<(), Box<dyn Error>> {
+async fn transfer(mut inbound: TcpStream, proxy_addr: String) -> Result<()> {
     let mut outbound = TcpStream::connect(proxy_addr).await?;
 
     let (mut ri, mut wi) = inbound.split();

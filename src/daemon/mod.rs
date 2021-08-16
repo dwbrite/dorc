@@ -17,6 +17,7 @@ use tokio::sync::Mutex;
 use tokio::time;
 use log::*;
 use hotwatch::notify::DebouncedEvent;
+use anyhow::*;
 
 // TODO: remove unnecessary unwraps (you know, do _actual_ error handling)
 
@@ -29,11 +30,12 @@ struct ProxiedApp {
 }
 
 impl ProxiedApp {
-    fn from_app(app: App) -> ProxiedApp {
+    fn from_app(app: App) -> Result<ProxiedApp> {
         let service_port = app.active_service.port;
-        let proxy = Arc::new(Mutex::new(block_on(Proxy::new(app.listen_port, service_port)).unwrap()));
+        let res_proxy = block_on(Proxy::new(app.listen_port, service_port))?;
+        let proxy = Arc::new(Mutex::new(res_proxy));
 
-        Self { app, proxy }
+        Ok(Self { app, proxy })
     }
 }
 
@@ -112,22 +114,25 @@ impl Daemon {
         }
     }
 
-    async fn reroute_proxies(&mut self) {
-        for (_, pa) in &mut self.apps {
-            let (app, proxy) = (&mut pa.app, &mut pa.proxy.lock().await);
-            proxy.reroute_to(app.active_service.port);
-        }
-    }
-
     fn load_app(&mut self, path: PathBuf) {
         info!("Loading app: {}", path.to_str().unwrap());
-        match App::load(&path) {
-            Ok(app) => {
-                self.apps.insert(path.clone(), ProxiedApp::from_app(app)); // ignore old value
-                self.hotwatch_release(path.clone())
-            },
-            Err(e) => { error!("Could not load file {:?} as app | {}", path.file_name(), e); },
+
+        let res_app = App::load(&path);
+
+        if let Err(e) = res_app {
+            error!("Could not load file {:?} as app | {}", path.file_name(), e);
+            return
         }
+
+        let res_proxied_app = ProxiedApp::from_app(res_app.unwrap());
+
+        if let Err(e) = res_proxied_app {
+            error!("Could not create ProxiedApp: {}", e);
+            return
+        }
+
+        self.apps.insert(path.clone(), res_proxied_app.unwrap()); // ignore old value
+        self.hotwatch_release(path.clone());
     }
 
     fn reload_app(&mut self, path: PathBuf) {
