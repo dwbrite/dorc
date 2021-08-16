@@ -66,6 +66,4 @@ Happy deploying!
 
 ## Installing `dorc`
 
-If I've uploaded this to crates.io, you can probably just run `cargo install dorc`.
-Otherwise, you may need to clone the repo and install `dorc` manually, along with the SystemD service file.
-(On debian-based distros, I've already set up `cargo-deb` to help with this!)
+Just run `cargo install dorc`! When you run a command with `dorc` for the first time, it will automatically install its SystemD service file.

@@ -33,7 +33,6 @@ impl ProxiedApp {
         let service_port = app.active_service.port;
         let proxy = Arc::new(Mutex::new(block_on(Proxy::new(app.listen_port, service_port)).unwrap()));
 
-
         Self { app, proxy }
     }
 }
@@ -121,6 +120,7 @@ impl Daemon {
     }
 
     fn load_app(&mut self, path: PathBuf) {
+        info!("Loading app: {}", path.to_str().unwrap());
         match App::load(&path) {
             Ok(app) => {
                 self.apps.insert(path.clone(), ProxiedApp::from_app(app)); // ignore old value
@@ -158,10 +158,10 @@ impl Daemon {
     }
     async fn switch_active(&mut self, path: PathBuf) {
         if let Some(proxied_app) = self.apps.get_mut(&path) {
-            proxied_app.app.swap_active();
-
             let (app, proxy) = (&mut proxied_app.app, &mut proxied_app.proxy.lock().await);
+            app.swap_active();
             proxy.reroute_to(app.active_service.port);
+            app.save();
         } else {
             error!("Could not retrieve app from {}", path.to_str().unwrap())
         }
@@ -179,9 +179,6 @@ pub enum Commands {
 pub async fn start() {
     let mut daemon = Daemon::new();
     daemon.load_all_apps();
-    // let's not hotwatch this dir - let's just call a command through the fifo fd
-    // when applications are modified from dorc commands
-    // TODO: watch app release-dir + bin, copy to inactive
 
     tokio::spawn(watch_fifo(daemon.cmd_tx.clone()));
 
@@ -194,7 +191,7 @@ pub async fn start() {
 }
 
 fn app_pathbuf(app_name: String) -> PathBuf {
-    PathBuf::from_str(&format!("{}/{}.toml", APPS_DIR, app_name)).unwrap()
+    PathBuf::from_str(&format!("{}{}.toml", APPS_DIR, app_name)).unwrap()
 }
 
 pub(crate) async fn watch_fifo(sender: mpsc::Sender<Commands>) {
