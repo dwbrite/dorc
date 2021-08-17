@@ -2,7 +2,6 @@
 
 use std::fmt::Debug;
 use std::fs::create_dir_all;
-use std::{fs};
 use std::path::Path;
 
 use anyhow::Result;
@@ -20,7 +19,7 @@ use crate::daemon::FIFO;
 mod registration;
 mod daemon;
 
-const SERVICE_FILE_PATH: &str = "/usr/lib/systemd/system/dorc.service";
+// const SERVICE_FILE_PATH: &str = "/usr/lib/systemd/system/dorc.service";
 
 #[derive(Debug, PartialEq, StructOpt)]
 #[structopt(
@@ -115,23 +114,11 @@ impl App {
 
 }
 
-fn check_install() {
-    if Path::new(SERVICE_FILE_PATH).exists() {
-        return;
-    }
-
-    sudo::escalate_if_needed().expect("Higher privilege required to write service files.");
-
-    let service = include_str!("../meta/debian/dorc.service");
-    fs::write(SERVICE_FILE_PATH, service).unwrap();
-}
-
 #[tokio::main]
 async fn main() {
     let opt: Opt = Opt::from_args();
 
     configure_logging();
-    check_install();
 
     match opt.subcommand {
         Subcommands::StartDaemon => { daemon::start().await; }

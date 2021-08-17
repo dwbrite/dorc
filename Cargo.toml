@@ -1,11 +1,12 @@
 [package]
 name = "dorc"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Devin Brite <devin@dwbrite.com>"]
 edition = "2018"
 description = "devin's orchestrator - a stupid deployment utility"
 repository = "https://github.com/dwbrite/dorc"
 license = "BSD-3-Clause-Attribution"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
