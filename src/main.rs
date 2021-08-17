@@ -80,7 +80,7 @@ impl App {
                 skip_exist: false,
                 buffer_size: 64000,
                 copy_inside: true,
-                content_only: false,
+                content_only: true,
                 depth: 0,
             },
         )?;

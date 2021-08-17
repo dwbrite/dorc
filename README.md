@@ -48,7 +48,7 @@ switch between them by enabling and disabling configurations.
 But that feels clunky and you technically have some downtime. 
 _And_ when your binaries change you'll have to stop and restart them yourself.
 
-Setting up k8s is a pain and k8 engines are _annoying_. There's a few other high friction options, but you're _lazy_.
+Setting up k8s is a pain and k8 engines are _expensive_. There's a few other high friction options, but you're _lazy_.
 
 If that sounds like you, `dorc` is your solution in search of a problem!
 

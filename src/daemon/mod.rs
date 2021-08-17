@@ -78,6 +78,7 @@ impl Daemon {
         let result = self.hotwatch.watch(path.clone(), move |event| {
             match event {
                 DebouncedEvent::Error(e, p) => error!("error while watching {:?}: {}", p, e),
+                DebouncedEvent::Rescan => {}
                 _ => sender.send(Commands::CopyRelease(path.clone())).unwrap()
             }
         });
