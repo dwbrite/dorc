@@ -1,6 +1,19 @@
 TODO: add badges
 
-# Devin's Orchestrator (`dorc`) - a stupid deployment utility
+```
+    __/\\\\\\\\\\\\__________/\\\\\_________/\\\\\\\\\____________/\\\\\\\\\_
+     _\/\\\////////\\\______/\\\///\\\_____/\\\///////\\\_______/\\\////////__
+      _\/\\\______\//\\\___/\\\/__\///\\\__\/\\\_____\/\\\_____/\\\/___________
+       _\/\\\_______\/\\\__/\\\______\//\\\_\/\\\\\\\\\\\/_____/\\\_____________
+        _\/\\\_______\/\\\_\/\\\_______\/\\\_\/\\\//////\\\____\/\\\_____________
+         _\/\\\_______\/\\\_\//\\\______/\\\__\/\\\____\//\\\___\//\\\____________
+          _\/\\\_______/\\\___\///\\\__/\\\____\/\\\_____\//\\\___\///\\\__________
+           _\/\\\\\\\\\\\\/______\///\\\\\/_____\/\\\______\//\\\____\////\\\\\\\\\_
+            _\////////////__________\/////_______\///________\///________\/////////__
+   
+                              A stupid deployment utility!
+```
+
 
 `dorc` is a tool for deploying simple backend services with a green–blue strategy.
 
@@ -72,10 +85,37 @@ I leave `Working dir:` default, and tell `dorc` how to start and stop my applica
 
 And that's it!
 
+`dorc` is pretty stupid, so if I want to run more than one website, I need to run `nginx` in front of it.
+
+```
+             apache/nginx                                 blue-dwbrite.com
+            ┌─────────────────┐                          ┌─────────────────┐
+            │                 │                          │.        .   *   │
+            │   dwbrite.com───►:41234                    │   .      .      │
+:80,:443◄───►                 │              :41235◄─────►  .     *    . * │
+            │                 │                          │  *    .  *   :) │
+            │   ohej.us───────►:8080                     │     ..    *    .│
+            │                 │                          │   *    *    .   │
+            └─────────────────┘                          └─────────────────┘
+
+
+
+
+             dorc (dwbrite.com)                           green-dwbrite.com
+            ┌─────────────────┐                          ┌─────────────────┐
+            │       active    │                          │   *    ..      .│
+            │     ┌───────────►:41235                    │.            *   │
+:41234◄─────┼─────┘           │              :41236◄─────►  :) *    .    . │
+            │     . inactive  │                          │* .    .  *   .  │
+            │     .............:41236                    │    *  .  ..  *  │
+            │                 │                          │  .      *   *  .│
+            └─────────────────┘                          └─────────────────┘
+```
+
 When a new version of my website is uploaded, `dorc` will copy that to the inactive service. \
 Then I can call `dorc switch dwbrite.com` to swap which service is considered active. \
 If I run into any problems, or if I simply don't _like_ this change, 
-I can call `dorc switch dwbrite.com` again to roll-back to the previous version.
+I can call `dorc switch dwbrite.com` again to roll back to the previous version.
 
 ---
 
@@ -93,4 +133,4 @@ Happy deploying!
 - `rustup toolchain install nightly`
 - `cargo install cargo-deb`
 
-Clone the project, `cd` into it, and run `cargo deb --install`
+Clone the project, `cd` into it, and run `cargo +nightly deb --install`
